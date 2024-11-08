@@ -1,0 +1,19 @@
+{
+  "name": "@jopoepl/text-keyword-extractor",
+  "version": "1.0.0",
+  "description": "Extract keywords from text content",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "keywords": [
+    "keywords",
+    "extraction",
+    "text-processing",
+    "nlp"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jopoepl/text-keyword-extractor.git"
+  }
+}

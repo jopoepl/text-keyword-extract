@@ -156,7 +156,9 @@ class KeywordExtractor {
     }
 
     this.keywords.push(...new Set(this.removeStopWords(properNouns)));
-    return [...new Set(this.removeStopWords(properNouns))];
+    const cleanedProperNouns = this.cleanupKeywords(properNouns);
+
+    return [...new Set(this.removeStopWords(cleanedProperNouns))];
   }
 
   /**
@@ -164,33 +166,40 @@ class KeywordExtractor {
    * @param {number} N - Number of top keywords to return
    * @returns {Array<{word: string, frequency: number}>} Array of keyword objects with frequencies
    */
+
   findHighFrequencyKeywords(N = 7) {
     if (typeof N !== "number" || N < 1) {
       throw new Error("N must be a positive number");
     }
-    // Create frequency map
+
     this.words = this.removeStopWords(this.tokenize());
     const frequency = this.words.reduce((acc, word) => {
       acc[word] = (acc[word] || 0) + 1;
       return acc;
     }, {});
 
-    // Sort by frequency and get top N
     const keywordFreq = Object.entries(frequency)
-      .filter(([word]) => !/^\d+$/.test(word)) // Remove pure numbers
-      .sort(([, a], [, b]) => b - a) // Sort by frequency (descending)
-      .slice(0, N) // Take top N
+      .filter(([word]) => !/^\d+$/.test(word))
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, N + 1)
       .map(([word, freq]) => ({
-        // Convert to nicer format
         word,
         frequency: freq,
       }));
 
-    this.keywords.push(
-      ...keywordFreq.slice(0, 5).map((keyword) => keyword.word),
-    );
+    // Clean first
+    const cleanedKeywordFreq = keywordFreq
+      .map((item) => ({
+        word: this.cleanupKeywords([item.word])[0],
+        frequency: item.frequency,
+      }))
+      .filter((item) => item.word);
 
-    return keywordFreq;
+    // Then update keywords array with cleaned words
+    const newWords = cleanedKeywordFreq.map((item) => item.word);
+    this.keywords = Array.from(new Set([...this.keywords, ...newWords]));
+
+    return cleanedKeywordFreq; // Return cleaned version
   }
 
   /**
@@ -226,8 +235,10 @@ class KeywordExtractor {
    * @private
    * @returns {string[]} Cleaned keywords
    */
-  cleanupKeywords() {
-    const cleanedKeywords = this.keywords
+  cleanupKeywords(providedKeywords = null) {
+    const wordsToClean = providedKeywords || this.keywords;
+
+    const cleanedKeywords = wordsToClean
       .map((word) => {
         const cleaned = word
           // First remove trailing punctuation and symbols
@@ -247,7 +258,11 @@ class KeywordExtractor {
       })
       .filter(Boolean);
 
-    this.keywords = Array.from(new Set(this.removeStopWords(cleanedKeywords))); //running remove stopwords again in case there are misses after cleanup
+    if (!providedKeywords) {
+      this.keywords = Array.from(
+        new Set(this.removeStopWords(cleanedKeywords)),
+      );
+    }
     return cleanedKeywords;
   }
 
@@ -255,12 +270,12 @@ class KeywordExtractor {
    * Removes subset words from keywords
    * @returns {string[]} Final processed keywords
    */
-  removeSubsetWords() {
+  removeSubsetWords(text = null) {
+    const wordsToProcess = this.keywords || text.tokenize();
     // Convert Set to Array for processing
-    const words = Array.from(this.keywords);
 
     // Sort by length (descending) to process longer phrases first
-    const sortedWords = words.sort((a, b) => b.length - a.length);
+    const sortedWords = wordsToProcess.sort((a, b) => b.length - a.length);
 
     // Keep track of words to remove
     const wordsToRemove = new Set();

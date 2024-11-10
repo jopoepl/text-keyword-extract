@@ -28,7 +28,19 @@ class KeywordExtractor {
    */
   tokenize() {
     try {
-      return this.content.split(/\s+/).filter(Boolean);
+      // Split into sentences first
+      const sentences = this.content.split(/([.!?])\s+/);
+
+      // Process each sentence while preserving sentence boundaries
+      return sentences
+        .map((sentence) => {
+          return sentence
+            .replace(/([,;:])/g, " $1 ") // Add spaces around punctuation
+            .split(/\s+/) // Split on whitespace
+            .map((word) => word.trim())
+            .filter(Boolean);
+        })
+        .flat();
     } catch (error) {
       console.error("Error tokenizing content:", error);
       return [];
@@ -81,86 +93,90 @@ class KeywordExtractor {
    * @returns {string[]} Array of proper nouns
    */
   findProperNouns() {
-    this.words = this.tokenize(this.content);
-    // this.words = this.removeStopWords(this.words);
+    // Get sentences and their words
+    let sentences = this.content.split(/[.!?](?:\s+|\s*(?=[A-Z]))/);
     const properNouns = [];
-    for (let i = 0; i < this.words.length; i++) {
-      let currentWord = this.words[i];
 
-      // Skip words less than 2 characters
-      if (currentWord.length < 2) continue;
+    sentences.forEach((sentence) => {
+      const words = sentence
+        .split(/\s+/)
+        .flatMap((word) =>
+          word.includes("+") ? word.split(/\+/).filter(Boolean) : [word],
+        )
+        .filter(Boolean);
+      for (let i = 0; i < words.length; i++) {
+        let currentWord = words[i];
 
-      // Pattern 1: Single capitalized word (e.g., Samsung, Google)
-      if (/^[A-Z][a-zA-Z]*$/.test(currentWord)) {
-        properNouns.push(currentWord);
-      }
+        // Skip words less than 2 characters or if it's a stop word
+        if (
+          currentWord.length < 2 ||
+          this.stopWords.has(currentWord.toLowerCase())
+        )
+          continue;
 
-      // Pattern 2: Compound names with capitals (e.g., OnePlus, MacBook)
-      if (/^[A-Z][a-z]*[A-Z][a-zA-Z]*$/.test(currentWord)) {
-        properNouns.push(currentWord);
-      }
+        // Skip if it's the first word of a sentence (unless it matches our proper noun patterns)
+        const isFirstWord = i === 0;
+        const isProperNounPattern =
+          /^[A-Z][a-z]*[A-Z][a-zA-Z]*$/.test(currentWord) || // Compound names (MacBook)
+          (/^[A-Z][a-zA-Z0-9]*$/.test(currentWord) && /\d/.test(currentWord)); // Words with numbers (iPhone14)
 
-      // Pattern 3: Words with numbers (e.g., iPhone14, RTX4090)
-      if (/^[A-Z][a-zA-Z0-9]*$/.test(currentWord) && /\d/.test(currentWord)) {
-        properNouns.push(currentWord);
-      }
+        if (isFirstWord && !isProperNounPattern) continue;
 
-      // Pattern 4: Multi-word proper nouns (e.g., OnePlus Nord, Microsoft Surface Pro)
-      if (/^[A-Z]/.test(currentWord)) {
-        let phrase = [currentWord];
-        let j = i + 1;
-        let isPhrase = false;
+        // Pattern 1: Single capitalized word (e.g., Samsung, Google)
+        if (/^[A-Z][a-zA-Z]*$/.test(currentWord)) {
+          properNouns.push(currentWord);
+        }
 
-        while (
-          j < this.words.length &&
-          (/^[A-Z]/.test(this.words[j]) || /\d/.test(this.words[j]))
-        ) {
-          // Check for any separating punctuation (comma, period, semicolon)
-          if (
-            this.words[j - 1].match(
-              /[,;:?.!()"’”\-\[\]{}|<>\/\\~@#$%^&*_+=]$|[,;?:.!()"’”\-\[\]{}|<>\/\\~@#$%^&*_+=].$/,
-            )
+        // Pattern 2 & 3: Already checked in isProperNounPattern
+        if (isProperNounPattern) {
+          properNouns.push(currentWord);
+        }
+
+        // Pattern 4: Multi-word proper nouns with technical specifications
+        if (/^[A-Z]/.test(currentWord) && !isFirstWord) {
+          let phrase = [currentWord];
+          let j = i + 1;
+
+          while (
+            j < words.length &&
+            (/^[A-Z]/.test(words[j]) || /^\d/.test(words[j]))
           ) {
-            // If we have collected words, add them as a phrase - covered an edge case where the period comes after end quotes.
-            if (phrase.length > 1) {
-              // Remove any punctuation from the last word
-              phrase[phrase.length - 1] = phrase[phrase.length - 1].replace(
-                /[,;.]$/,
-                "",
-              );
-              properNouns.push(phrase.join(" "));
-              isPhrase = true;
+            const nextWord = words[j];
+            // Check for model numbers, technical specs, or capitalized words
+            if (
+              /^[A-Z]/.test(nextWord) || // Capitalized words
+              /^\d/.test(nextWord) || // Numbers
+              /^[A-Za-z]\d/.test(nextWord) || // Alphanumeric combinations
+              /^[+]$/.test(nextWord) || // Plus sign
+              nextWord.toLowerCase() === "plus" || // Word "plus"
+              /^[A-Za-z]+\d+\+?$/.test(nextWord) // Words like "Dimensity9300+"
+            ) {
+              if (!this.stopWords.has(nextWord.toLowerCase())) {
+                phrase.push(nextWord);
+              }
+              j++;
             } else {
-              // Single word with punctuation, add it individually
-              properNouns.push(phrase[0].replace(/[,;.]$/, ""));
+              break;
             }
-            // Start new phrase
-            phrase = [this.words[j]];
-          } else {
-            phrase.push(this.words[j]);
           }
-          j++;
-        }
 
-        // Handle the last phrase or word
-        if (phrase.length > 1) {
-          properNouns.push(phrase.join(" "));
-          isPhrase = true;
-        } else if (!isPhrase) {
-          // Only add single words that weren't part of a phrase
-          properNouns.push(phrase[0]);
+          if (phrase.length > 1) {
+            properNouns.push(phrase.join(" "));
+            i = j - 1; // Skip processed words
+          }
         }
-
-        i = j - 1; // Skip the words we've included
       }
-    }
+    });
 
-    this.keywords.push(...new Set(this.removeStopWords(properNouns)));
+    // Clean up and remove duplicates
     const cleanedProperNouns = this.cleanupKeywords(properNouns);
+    const finalProperNouns = [
+      ...new Set(this.removeStopWords(cleanedProperNouns)),
+    ];
+    this.keywords.push(...finalProperNouns);
 
-    return [...new Set(this.removeStopWords(cleanedProperNouns))];
+    return finalProperNouns;
   }
-
   /**
    * Finds the most frequent keywords
    * @param {number} N - Number of top keywords to return
